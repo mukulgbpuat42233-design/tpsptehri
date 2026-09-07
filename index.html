@@ -663,7 +663,7 @@ body[data-cloud-ready="1"] #cloudStatus{font-weight:800}
     <p style="font-size:11px;color:#66758b;margin-top:-5px">Sign in to sync your PSP data securely to cloud storage.</p><div id="authSetupHint" style="display:none;background:#fff7e8;border:1px solid #f0d39a;border-radius:10px;padding:10px;margin:8px 0 12px;font-size:11px;color:#7a5700">Supabase Cloud is configured. Login to sync your market data.</div>
     <div class="field" style="margin-bottom:10px"><label>Email</label><input id="authEmail" type="email" placeholder="you@example.com"></div>
     <div class="field" style="margin-bottom:10px"><label>Password</label><input id="authPassword" type="password" placeholder="Password"></div>
-    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn outline" id="closeAuth">CLOSE</button><button class="btn primary" id="signupBtn">SIGN UP</button><button class="btn green" id="loginBtn">LOGIN</button></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn outline" id="closeAuth">CLOSE</button><button class="btn primary" id="signupBtn">SIGN UP</button><button type="button" class="btn green" id="loginBtn">LOGIN</button></div>
     <div class="status" id="authStatus"></div><div style="font-size:10px;color:#718096;margin-top:7px;text-align:center">Secure Supabase Auth • Data remains protected by your existing RLS policies.</div>
   </div>
 </div>
@@ -1289,31 +1289,45 @@ initSupabase().then(()=>{if(cloudReady&&sbUser)syncCloudToLocal().catch(e=>conso
 })();
 </script>
 
-<script id="login-button-fallback-v1">
+<script id="tehri-login-hard-fix">
 (function(){
-  function bindLogin(){
-    const btn=document.getElementById('authBtn');
+  function setup(){
+    const btn=document.getElementById('loginBtn');
     const modal=document.getElementById('authModal');
-    const email=document.getElementById('authEmail');
-    if(!btn || !modal || btn.dataset.loginFallback==='1') return;
-    btn.dataset.loginFallback='1';
-    btn.addEventListener('click',function(e){
-      e.preventDefault();
-      modal.style.display='flex';
-      const hint=document.getElementById('authSetupHint');
-      if(hint) hint.style.display='none';
-      if(email) setTimeout(function(){email.focus()},50);
+    const emailEl=document.getElementById('authEmail');
+    const passEl=document.getElementById('authPassword');
+    const status=document.getElementById('authStatus');
+    if(!btn||!modal||!emailEl||!passEl||!status)return;
+    if(btn.dataset.hardLoginBound==='1')return;
+    btn.dataset.hardLoginBound='1';
+    btn.addEventListener('click',async function(e){
+      e.preventDefault(); e.stopImmediatePropagation();
+      const email=emailEl.value.trim(), password=passEl.value;
+      status.textContent='LOGIN clicked • connecting...';
+      status.style.color='#1856a3'; status.style.fontWeight='700';
+      if(!email||!password){status.textContent='Enter email and password.';return}
+      btn.disabled=true; btn.style.opacity='.65';
+      const ctl=new AbortController(); const timer=setTimeout(()=>ctl.abort(),20000);
+      try{
+        const res=await fetch('/api/supabase',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'login',email,password}),signal:ctl.signal,cache:'no-store'});
+        const text=await res.text(); let data=null; try{data=JSON.parse(text)}catch(_){ }
+        if(!res.ok){throw new Error(data?.message||data?.error||('Server response HTTP '+res.status+(text?': '+text.slice(0,180):'')))}
+        if(!data?.access_token||!data?.user)throw new Error('Server connected, but no login session was returned.');
+        if(typeof saveCloudSession==='function')saveCloudSession(data);
+        if(typeof applyCloudSession==='function')applyCloudSession(data);
+        status.textContent='LOGIN SUCCESSFUL • syncing cloud data...';
+        status.style.color='#137945';
+        if(typeof syncCloudToLocal==='function')await syncCloudToLocal().catch(err=>console.warn('Cloud sync after login:',err));
+        setTimeout(()=>{modal.style.display='none';},300);
+      }catch(err){
+        console.error('Hard login fix:',err);
+        status.style.color='#b42318';
+        status.textContent=err?.name==='AbortError'?'Login timed out after 20 seconds.':('LOGIN ERROR: '+(err?.message||err));
+      }finally{clearTimeout(timer);btn.disabled=false;btn.style.opacity='1';}
     },true);
-    const close=document.getElementById('closeAuth');
-    if(close && close.dataset.closeFallback!=='1'){
-      close.dataset.closeFallback='1';
-      close.addEventListener('click',function(){modal.style.display='none'},true);
-    }
   }
-  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',bindLogin);
-  else bindLogin();
-  setTimeout(bindLogin,300);
-  setTimeout(bindLogin,1000);
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',setup);else setup();
 })();
 </script>
+
 </body></html>
